@@ -1,0 +1,13 @@
+
+name: package_health
+version: '1.0.0'
+config-version: 2
+
+profile: package_health
+
+model-paths: ["models"]
+
+models:
+  package_health:
+    staging:
+      +materialized: view

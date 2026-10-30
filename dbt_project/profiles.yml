@@ -1,0 +1,8 @@
+
+package_health:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: ../data/package_health.duckdb
+      threads: 4

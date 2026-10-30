@@ -1,3 +1,15 @@
 storage*
 github*
 CLAUDE.md
+.venv/
+.env
+data/
+*.duckdb
+*.duckdb.wal
+logs/
+*.log
+__pycache__/
+.pytest_cache/
+dbt_packages/
+target/
+dbt_project/.user.yml
