@@ -1,120 +1,51 @@
-
+"""Rubric plots: dimension comparison, monthly trends, 3-variable relationship."""
 from pathlib import Path
-
+import duckdb
 import pandas as pd
 import matplotlib.pyplot as plt
+OUT=Path("plots")
+OUT.mkdir(exist_ok=True,parents=True)
+scores=pd.read_csv("data/repository_metrics.csv").sort_values("overall_rank")
+conn=duckdb.connect("data/package_health.duckdb",read_only=True)
+months=conn.execute("SELECT * FROM mart_repo_monthly ORDER BY month").df()
+conn.close()
+colors={r:c for r,c in zip(sorted(scores.repo),["#2064ab","#c56620","#48844c"])}
+dimensions=["activity","responsiveness","throughput","backlog","release_cadence"]
+fig,ax=plt.subplots(figsize=(11,6))
+x=range(len(dimensions))
+for _,r in scores.iterrows():
+    ax.plot(x,[r[d+"_score"] for d in dimensions],marker="o",linewidth=2.2,
+            color=colors[r.repo],label=f"#{int(r.overall_rank)} {r.repo}: {r.overall_health_score:.1f}")
+ax.set_xticks(list(x),["Activity","Responsiveness","Throughput","Backlog","Release cadence"])
+ax.set_ylabel("Dimension score (0–100)")
+ax.set_ylim(0,105)
+ax.set_title("Package Health Dimension Profile")
+ax.grid(axis="y",alpha=.25)
+ax.legend(fontsize=9)
+fig.tight_layout();fig.savefig(OUT/"dimension_profile.png",dpi=200);plt.close(fig)
 
-DATA_PATH = "data/repository_metrics.csv"
-OUTPUT_DIR = Path("outputs/figures")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+fig,axes=plt.subplots(3,1,figsize=(11,10),sharex=True)
+for ax,(column,label) in zip(axes,[("commits","Monthly commits"),("prs_opened","New PRs"),("prs_merged","Merged PRs")]):
+    for repo,part in months.groupby("repo"):
+        ax.plot(part["month"],part[column],label=repo,color=colors[repo],linewidth=1.8)
+    ax.set_ylabel(label+" (count)")
+    ax.grid(alpha=.2)
+axes[0].legend()
+axes[-1].set_xlabel("Calendar month (2024 to run month)")
+fig.suptitle("Monthly Development Trends")
+fig.tight_layout();fig.savefig(OUT/"monthly_trends.png",dpi=200);plt.close(fig)
 
-df = pd.read_csv(DATA_PATH)
-df["name"] = df["repo"].str.split("/").str[-1]
-
-# Plot 1: Development activity
-fig, ax = plt.subplots(figsize=(9, 6))
-
-scatter = ax.scatter(
-    df["commit_count"],
-    df["merged_prs"],
-    s=df["contributors"] * 2,
-    c=df["overall_health_score"],
-    cmap="viridis",
-    alpha=0.75,
-    edgecolors="black"
-)
-
-for _, row in df.iterrows():
-    ax.annotate(
-        row["name"],
-        (row["commit_count"], row["merged_prs"]),
-        xytext=(8, 8),
-        textcoords="offset points"
-    )
-
-ax.set_xlabel("Commits since January 2024")
-ax.set_ylabel("Merged pull requests since January 2024")
-ax.set_title("Development Activity vs. Merged PRs")
-
-fig.colorbar(scatter, ax=ax, label="Health score")
-fig.tight_layout()
-fig.savefig(OUTPUT_DIR / "development_activity.png", dpi=300)
-plt.close(fig)
-
-
-# Plot 2: Collaboration vs. release activity
-fig, ax = plt.subplots(figsize=(9, 6))
-
-scatter = ax.scatter(
-    df["reviews_per_pr"],
-    df["release_count"],
-    s=df["contributors"] * 2,
-    c=df["overall_health_score"],
-    cmap="plasma",
-    alpha=0.75,
-    edgecolors="black"
-)
-
-for _, row in df.iterrows():
-    ax.annotate(
-        row["name"],
-        (row["reviews_per_pr"], row["release_count"]),
-        xytext=(8, 8),
-        textcoords="offset points"
-    )
-
-ax.set_xlabel("Observed reviews per PR (partial data)")
-ax.set_ylabel("Releases since January 2024")
-ax.set_title("Collaboration vs. Release Activity")
-
-fig.colorbar(scatter, ax=ax, label="Health score")
-fig.tight_layout()
-fig.savefig(OUTPUT_DIR / "collaboration_releases.png", dpi=300)
-plt.close(fig)
-
-
-# Plot 3: Repository health score breakdown
-score_columns = [
-    "commit_count_score",
-    "contributors_score",
-    "merged_prs_score",
-    "reviews_per_pr_score",
-    "release_count_score",
-    "release_frequency_score"
-]
-
-score_labels = [
-    "Commits",
-    "Contributors",
-    "Merged PRs",
-    "Reviews/PR",
-    "Releases",
-    "Release frequency"
-]
-
-plot_df = df.set_index("name")[score_columns]
-plot_df.columns = score_labels
-
-ax = plot_df.T.plot(
-    kind="bar",
-    figsize=(11, 6),
-    width=0.75
-)
-
-ax.set_title("Repository Health: Metric Score Comparison")
-ax.set_xlabel("Health metric")
-ax.set_ylabel("Relative metric score")
-ax.set_ylim(0, 105)
-ax.legend(title="Repository")
-plt.xticks(rotation=30, ha="right")
-plt.tight_layout()
-plt.savefig(OUTPUT_DIR / "health_score_comparison.png", dpi=300)
-plt.close()
-
-print("Successfully created 3 visualizations:")
-for filename in [
-    "development_activity.png",
-    "collaboration_releases.png",
-    "health_score_comparison.png"
-]:
-    print(f"  {OUTPUT_DIR / filename}")
+fig,ax=plt.subplots(figsize=(10,6))
+for _,r in scores.iterrows():
+    x=r.pct_reviewed_within_7d*100 if pd.notna(r.pct_reviewed_within_7d) else 0
+    y=r.merge_rate*100 if pd.notna(r.merge_rate) else 0
+    size=max(50,float(r.commits_per_week)*18)
+    ax.scatter(x,y,s=size,color=colors[r.repo],edgecolors="black",alpha=.7,label=r.repo)
+    ax.annotate(r.repo.split("/")[-1],(x,y),xytext=(7,7),textcoords="offset points")
+ax.set_xlabel("PRs reviewed within 7 days (%)")
+ax.set_ylabel("Merge rate (%)")
+ax.set_title("Response, Throughput and Activity (bubble area ∝ commits/week)")
+ax.set_xlim(-5,105);ax.set_ylim(-5,105)
+ax.grid(alpha=.2);ax.legend()
+fig.tight_layout();fig.savefig(OUT/"health_relationship.png",dpi=200);plt.close(fig)
+print("Created:",*[str(x) for x in sorted(OUT.glob("*.png"))],sep="\n")
