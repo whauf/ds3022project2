@@ -1,4 +1,8 @@
-dbt-core
-dbt-duckdb
+duckdb==1.4.1
+dbt-core==1.12.6
+dbt-duckdb==1.11.1
 prefect==3.9.0
-httpx
+httpx==0.28.1
+pandas==2.2.3
+numpy==2.3.5
+matplotlib==3.10.8
