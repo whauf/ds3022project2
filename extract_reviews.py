@@ -80,6 +80,9 @@ def main():
                 saved = json.loads(pr_file.read_text())
 
                 for pr in saved["data"]:
+                    # Only review PRs created within the assignment window.
+                    if pr.get("created_at", "") < "2024-01-01":
+                        continue
                     number = pr["number"]
 
                     # Each PR gets its own folder so it can resume.
@@ -148,7 +151,7 @@ def main():
                 if MAX_PRS_PER_REPO is not None and processed >= MAX_PRS_PER_REPO:
                     break
 
-            print(f"Finished test for {repo}: {processed} PRs")
+            print(f"Finished {repo}: {processed} PRs in analysis window")
 
 
 if __name__ == "__main__":
