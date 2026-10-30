@@ -1,0 +1,89 @@
+version: 2
+sources:
+  - name: github
+    schema: main
+    tables:
+      - name: raw_commits
+      - name: raw_pull_requests
+      - name: raw_pr_reviews
+      - name: raw_releases
+models:
+  - name: stg_commits
+    columns:
+      - name: commit_sha
+        data_tests: [not_null]
+  - name: stg_pull_requests
+    columns:
+      - name: pr_number
+        data_tests: [not_null]
+      - name: state
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['open','closed']
+  - name: stg_reviews
+    columns:
+      - name: review_id
+        data_tests: [not_null]
+  - name: stg_releases
+    columns:
+      - name: release_id
+        data_tests: [not_null]
+  - name: fct_pull_requests
+    description: PRs created since 2024, including open PRs
+    columns:
+      - name: repo
+        description: GitHub owner and repository
+        data_tests: [not_null]
+      - name: pr_number
+        description: Repository-local PR number
+        data_tests: [not_null]
+      - name: hours_to_first_review
+        description: Hours until first qualifying non-author non-bot review
+      - name: hours_to_merge
+        description: Hours from creation to merge, null unless merged
+  - name: fct_releases
+    description: Published releases since 2024
+    columns:
+      - name: repo
+        description: Repository
+      - name: release_id
+        description: GitHub ID
+        data_tests: [not_null]
+      - name: days_since_previous
+        description: Gap to preceding release in days
+  - name: mart_repo_monthly
+    description: Repo by month activity, including zero months
+    columns:
+      - name: repo
+        description: Repository
+      - name: month
+        description: Month start date
+      - name: commits
+        description: Commits in month
+      - name: prs_opened
+        description: New PRs during month
+      - name: prs_merged
+        description: PRs merged in month
+      - name: merge_ratio
+        description: Merged share of PRs concluded in month
+  - name: mart_health_inputs
+    description: Relative size normalized health inputs
+    columns:
+      - name: repo
+        description: Repository
+        data_tests: [not_null, unique]
+      - name: commits_per_week
+        description: Average commits per week
+      - name: commit_trend
+        description: Slope of completed monthly commit counts
+      - name: pct_reviewed_within_7d
+        description: Share of eligible PRs reviewed within seven days
+      - name: median_hours_to_merge
+        description: Median hours to merge
+      - name: pct_stale_open_prs
+        description: Stale share of open PRs
+      - name: merge_rate
+        description: Share of concluded PRs that merged
+      - name: releases_per_year
+        description: Annualized published releases
