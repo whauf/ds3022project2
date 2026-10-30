@@ -1,176 +1,51 @@
-
+"""Weighted, size-normalized repository health scores from dbt health mart."""
 from pathlib import Path
-
 import duckdb
 import pandas as pd
 
-DB_PATH = "data/package_health.duckdb"
-OUTPUT_PATH = Path("data/repository_metrics.csv")
-
-START_DATE = "2024-01-01"
-
-
+DB="data/package_health.duckdb"
+OUT=Path("data/repository_metrics.csv")
+METRICS={
+    "commits_per_week":("activity",True,0.10),
+    "commit_trend":("activity",True,0.15),
+    "pct_reviewed_within_7d":("responsiveness",True,0.20),
+    "median_hours_to_merge":("throughput",False,0.15),
+    "merge_rate":("throughput",True,0.15),
+    "pct_stale_open_prs":("backlog",False,0.10),
+    "releases_per_year":("release_cadence",True,0.15),
+}
 def main():
-    con = duckdb.connect(DB_PATH, read_only=True)
-
-    query = """
-    WITH commits AS (
-        SELECT
-            repo,
-            COUNT(*) AS commit_count,
-            COUNT(DISTINCT author_name) AS contributors
-        FROM stg_commits
-        WHERE TRY_CAST(committed_at AS TIMESTAMP)
-              >= TIMESTAMP '2024-01-01'
-        GROUP BY repo
-    ),
-
-    pulls AS (
-        SELECT
-            repo,
-            COUNT(*) FILTER (
-                WHERE merged_at IS NOT NULL
-                  AND TRY_CAST(merged_at AS TIMESTAMP)
-                      >= TIMESTAMP '2024-01-01'
-            ) AS merged_prs,
-            COUNT(*) FILTER (
-                WHERE TRY_CAST(created_at AS TIMESTAMP)
-                      >= TIMESTAMP '2024-01-01'
-            ) AS recent_prs
-        FROM stg_pull_requests
-        GROUP BY repo
-    ),
-
-    reviews AS (
-        SELECT
-            repo,
-            COUNT(*) AS review_count
-        FROM stg_reviews
-        WHERE TRY_CAST(submitted_at AS TIMESTAMP)
-              >= TIMESTAMP '2024-01-01'
-        GROUP BY repo
-    ),
-
-    release_dates AS (
-        SELECT
-            repo,
-            TRY_CAST(published_at AS TIMESTAMP) AS published_date
-        FROM stg_releases
-        WHERE is_draft = FALSE
-          AND TRY_CAST(published_at AS TIMESTAMP)
-              >= TIMESTAMP '2024-01-01'
-    ),
-
-    release_intervals AS (
-        SELECT
-            repo,
-            published_date,
-            DATE_DIFF(
-                'day',
-                LAG(published_date) OVER (
-                    PARTITION BY repo
-                    ORDER BY published_date
-                ),
-                published_date
-            ) AS days_between
-        FROM release_dates
-    ),
-
-    releases AS (
-        SELECT
-            repo,
-            COUNT(*) AS release_count,
-            AVG(days_between) AS avg_days_between_releases
-        FROM release_intervals
-        GROUP BY repo
-    )
-
-    SELECT
-        c.repo,
-        c.commit_count,
-        c.contributors,
-        COALESCE(p.merged_prs, 0) AS merged_prs,
-        COALESCE(p.recent_prs, 0) AS recent_prs,
-        COALESCE(r.review_count, 0) AS review_count,
-        COALESCE(
-            CAST(r.review_count AS DOUBLE)
-            / NULLIF(p.recent_prs, 0),
-            0
-        ) AS reviews_per_pr,
-        COALESCE(rel.release_count, 0) AS release_count,
-        rel.avg_days_between_releases
-    FROM commits c
-    LEFT JOIN pulls p USING (repo)
-    LEFT JOIN reviews r USING (repo)
-    LEFT JOIN releases rel USING (repo)
-    ORDER BY c.repo
-    """
-
-    df = con.execute(query).df()
-    con.close()
-
-    # Rank repositories on each metric.
-    # Higher is better, except days between releases.
-    positive_metrics = [
-        "commit_count",
-        "contributors",
-        "merged_prs",
-        "reviews_per_pr",
-        "release_count",
-    ]
-
-    for metric in positive_metrics:
-        df[f"{metric}_score"] = (
-            df[metric].rank(pct=True) * 100
-        )
-
-    df["release_frequency_score"] = (
-        df["avg_days_between_releases"]
-        .rank(ascending=False, pct=True)
-        * 100
-    ).fillna(0)
-
-    score_columns = [
-        f"{metric}_score" for metric in positive_metrics
-    ] + ["release_frequency_score"]
-
-    df["overall_health_score"] = (
-        df[score_columns].mean(axis=1)
-    ).round(2)
-
-    df["overall_rank"] = (
-        df["overall_health_score"]
-        .rank(ascending=False, method="min")
-        .astype(int)
-    )
-
-    df = df.sort_values("overall_rank")
-
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(OUTPUT_PATH, index=False)
-
-    print("\nRepository Health Rankings:")
-    print(
-        df[
-            [
-                "repo",
-                "commit_count",
-                "merged_prs",
-                "contributors",
-                "reviews_per_pr",
-                "release_count",
-                "overall_health_score",
-                "overall_rank",
-            ]
-        ].to_string(index=False)
-    )
-
-    print(f"\nSaved metrics to {OUTPUT_PATH}")
-    print(
-        "\nNOTE: Review coverage is incomplete. "
-        "Review-based scores are provisional."
-    )
-
-
-if __name__ == "__main__":
-    main()
+    conn=duckdb.connect(DB)
+    try:
+        df=conn.execute("SELECT * FROM mart_health_inputs ORDER BY repo").df()
+        if len(df)!=3:
+            raise ValueError(f"Expected three repositories, found {len(df)}")
+        dimensions=sorted(set(v[0] for v in METRICS.values()))
+        weighted={}
+        for metric,(dimension,higher,weight) in METRICS.items():
+            x=pd.to_numeric(df[metric],errors="coerce")
+            if x.isna().all():
+                raise ValueError(f"No values for required metric: {metric}")
+            # Midpoint for an unavailable value; zero variance => neutral 50.
+            lo,hi=x.min(),x.max()
+            scores=pd.Series(50.0,index=x.index) if lo==hi else (x-lo)/(hi-lo)*100
+            if not higher:scores=100-scores
+            scores=scores.fillna(50)
+            df[metric+"_score"]=scores.round(2)
+            weighted[metric]=scores*weight
+        for d in dimensions:
+            included=[m for m,defn in METRICS.items() if defn[0]==d]
+            total_weight=sum(METRICS[m][2] for m in included)
+            df[d+"_score"]=sum(weighted[m] for m in included)/total_weight
+        df["overall_health_score"]=sum(weighted.values()).round(2)
+        df["overall_rank"]=df["overall_health_score"].rank(ascending=False,method="min").astype(int)
+        df=df.sort_values(["overall_rank","repo"])
+        OUT.parent.mkdir(exist_ok=True,parents=True)
+        df.to_csv(OUT,index=False)
+        conn.execute("CREATE OR REPLACE TABLE repository_health_rankings AS SELECT * FROM df")
+        cols=["repo","overall_rank","overall_health_score"]+[d+"_score" for d in dimensions]
+        print(df[cols].to_string(index=False))
+        print("Saved ranked table and",OUT)
+    finally:
+        conn.close()
+if __name__=="__main__":main()
