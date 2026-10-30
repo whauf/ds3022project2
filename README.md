@@ -1,5 +1,44 @@
 # Data Project 2 // Open Source Package Health: GitHub Data Pipeline
 
+## Student implementation (Set A)
+
+This repository implements a package-health pipeline comparing `numpy/numpy`, `networkx/networkx`, and `statsmodels/statsmodels` from **2024-01-01** through the ingestion time. The assignment specification is retained below for reference.
+
+**Status:** The original `main` branch was tested locally; the `rubric-fixes` branch adds the required raw tables, dbt fact/mart models, Python validation, health modeling, and rubric-style plots. **The new branch has NOT yet passed an end-to-end run, and should not be submitted without testing.** In particular, incremental API fetching based on the `_load_state` watermark, per-task log files, and screenshots/log excerpts of interrupted and resumed runs require further work.
+
+### Setup and run
+
+Use Python 3.13, install `requirements.txt`, and provide a `GITHUB_TOKEN` environment variable using the shell or local secret manager (never commit the token). Run from the project root:
+
+```bash
+python -m pip install -r requirements.txt
+python main.py
+```
+
+**Warning:** The first full review extraction makes one or more GitHub API requests per PR created since 2024 and may require several rate-limit windows. It resumes individual review JSON pages from the on-disk cache. Your first run should be monitored; no fixed runtime is promised. Files under `data/`, the DuckDB database, and logs are excluded from Git.
+
+To verify downstream stages against an existing landed dataset, without re-fetching GitHub API data:
+
+```bash
+python load_duckdb.py
+(cd dbt_project && dbt build --profiles-dir .)
+python validate_data.py
+python calculate_metrics.py
+python create_visualizations.py
+```
+
+This revision writes `data/package_health.duckdb`, `data/repository_metrics.csv`, and three PNG files in `plots/`. The dbt project uses four staging views, two fact models, two marts, and integrity tests.
+
+### Modeling decisions
+
+The scoring code uses normalized 0–100 min/max scores across the three repositories, reversing indicators for which lower is healthier. Weights: activity level (10%), activity trend (15%), seven-day review responsiveness (20%), median merge time (15%), merge rate (15%), stale open-PR fraction (10%), and releases per year (15%). These span activity, responsiveness, throughput, backlog and release cadence. All input metrics are rates, shares, or trends rather than raw counts. No single package's size guarantees the best score.
+
+Review response times exclude author self-reviews and reviewers whose usernames end in `[bot]`; contributor medians omit PRs that have not yet been reviewed or merged, rather than inventing a duration. Open PRs remain in fact tables and contribute to backlog metrics. Outlier checks flag merge times above 365 days and weekly commit counts above the mean plus three standard deviations, but keep those genuine observations.
+
+**Plots to interpret after running on your data:** `dimension_profile.png` shows the strongest and weakest dimensions for each ranked package; `monthly_trends.png` compares monthly commits, opened PRs, and merged PRs, including zero-activity months; `health_relationship.png` compares seven-day review coverage, merge rate and commits per week. The actual ranking and interpretation must be updated from the tested output rather than inferred from untested branch code.
+
+---
+
 Released: Oct 23, 2026 | Due: Nov 02, 2026
 
 > **Before you submit**, work through the [submission checklist](CHECKLIST.md). It lists every deliverable and what to submit in Canvas: your repository URL, and which extended items you attempted.
