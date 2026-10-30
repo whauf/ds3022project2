@@ -408,71 +408,52 @@ def extract_pull_requests():
     )
 
 
-@task(name="Extract Releases", retries=2)
-def extract_releases():
-    subprocess.run(
-        [sys.executable, "extract_releases.py"],
-        check=True
-    )
+@task(name="1 Extract All GitHub Endpoints", retries=2)
+def extract_all():
+    # Existing extraction helpers are Prefect tasks with resumable JSON caches.
+    extract_data()
+    extract_pull_requests()
+    subprocess.run([sys.executable, "extract_reviews.py"], check=True)
+    subprocess.run([sys.executable, "extract_releases.py"], check=True)
 
 
-@task(name="Check Saved PR Reviews")
-def extract_reviews():
-    logger = get_run_logger()
-    logger.warning(
-        "Using previously downloaded PR reviews. "
-        "Full review extraction is still incomplete."
-    )
-
-
-@task(name="Load DuckDB", retries=2)
+@task(name="2 Load Raw DuckDB", retries=2)
 def load_database():
-    subprocess.run(
-        [sys.executable, "load_duckdb.py"],
-        check=True
-    )
+    subprocess.run([sys.executable, "load_duckdb.py"], check=True)
 
 
-@task(name="Run dbt Models", retries=2)
+@task(name="3 Build and Test dbt", retries=2)
 def run_dbt():
-    subprocess.run(
-        ["dbt", "run", "--profiles-dir", "."],
-        cwd="dbt_project",
-        check=True
-    )
+    subprocess.run(["dbt", "build", "--profiles-dir", "."],
+                   cwd="dbt_project", check=True)
 
-@task(name="Calculate Health Metrics", retries=2)
+
+@task(name="4 Validate Data")
+def validate_data():
+    subprocess.run([sys.executable, "validate_data.py"], check=True)
+
+
+@task(name="5 Model Health Scores")
 def calculate_health_metrics():
-    subprocess.run(
-        [sys.executable, "calculate_metrics.py"],
-        check=True
-    )
+    subprocess.run([sys.executable, "calculate_metrics.py"], check=True)
 
 
-@task(name="Create Visualizations", retries=2)
+@task(name="6 Plot Results")
 def create_figures():
-    subprocess.run(
-        [sys.executable, "create_visualizations.py"],
-        check=True
-    )
+    subprocess.run([sys.executable, "create_visualizations.py"], check=True)
 
 
 @flow(name="package-health-flow")
 def package_health_flow():
     logger = get_run_logger()
-    logger.info("Starting package health pipeline.")
-
-    # GitHub commits and PRs were already downloaded.
-    # Their extraction functions are preserved above.
-
-    extract_releases()
-    extract_reviews()
+    logger.info("Starting six-stage package health pipeline")
+    extract_all()
     load_database()
     run_dbt()
+    validate_data()
     calculate_health_metrics()
     create_figures()
-
-    logger.info("Package health pipeline finished.")
+    logger.info("All six stages completed")
 
 
 if __name__ == "__main__":
