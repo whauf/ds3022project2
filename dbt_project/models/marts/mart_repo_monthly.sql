@@ -22,7 +22,8 @@ WITH runtime AS (
  SELECT repo,date_trunc('month',closed_at)::DATE AS month,COUNT(*) AS prs_closed_unmerged
  FROM {{ ref('fct_pull_requests') }} WHERE is_closed_unmerged GROUP BY 1,2
 ), commits AS (
- SELECT repo,date_trunc('month',TRY_CAST(committed_at AS TIMESTAMPTZ))::DATE month,COUNT(*) commits
+ SELECT repo,date_trunc('month',TRY_CAST(committed_at AS TIMESTAMPTZ))::DATE AS month,
+ COUNT(*) AS commits
  FROM {{ ref('stg_commits') }}
  WHERE TRY_CAST(committed_at AS TIMESTAMPTZ)>=TIMESTAMPTZ '2024-01-01'
  GROUP BY 1,2
